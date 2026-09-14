@@ -1,0 +1,153 @@
+pipeline {
+    agent any
+
+    environment {
+        TERRAFORM_DIR = 'aws/dev'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo 'Checking out Terraform code from GitHub...'
+
+                checkout scm
+
+                sh '''
+                    echo "Repository files:"
+                    ls -la
+
+                    echo "Terraform directory:"
+                    ls -la "$TERRAFORM_DIR"
+                '''
+            }
+        }
+
+        stage('AWS Role Test') {
+            steps {
+                echo 'Checking AWS identity through Jenkins IAM role...'
+
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'jenkins_ru_aws'
+                ]]) {
+                    sh '''
+                        set -e
+
+                        aws sts get-caller-identity
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Version') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    sh '''
+                        set -e
+
+                        terraform version
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Format Check') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    sh '''
+                        set -e
+
+                        terraform fmt -check -recursive
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'jenkins_ru_aws'
+                    ]]) {
+                        sh '''
+                            set -e
+
+                            terraform init
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Validate') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    sh '''
+                        set -e
+
+                        terraform validate
+                    '''
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'jenkins_ru_aws'
+                    ]]) {
+                        sh '''
+                            set -e
+
+                            terraform plan -out=tfplan
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Manual Approval') {
+            steps {
+                input(
+                    message: 'Terraform plan is ready. Do you want to create/update AWS infrastructure?',
+                    ok: 'Apply Terraform'
+                )
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                dir("${TERRAFORM_DIR}") {
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'jenkins_ru_aws'
+                    ]]) {
+                        sh '''
+                            set -e
+
+                            terraform apply -auto-approve tfplan
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Terraform infrastructure deployment completed successfully.'
+        }
+
+        failure {
+            echo 'Pipeline failed. Check the failed stage and console output.'
+        }
+
+        always {
+            echo 'Jenkins pipeline execution completed.'
+        }
+    }
+}
