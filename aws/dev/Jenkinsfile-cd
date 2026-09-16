@@ -1,0 +1,202 @@
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                echo 'Checking out main branch...'
+                checkout scm
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir('aws/dev') {
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'jenkins_ru_aws',
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+
+                        sh '''
+                            set -e
+
+                            echo "======================================"
+                            echo "AWS Identity - Jenkins IAM User"
+                            echo "======================================"
+
+                            aws sts get-caller-identity
+
+                            echo ""
+                            echo "======================================"
+                            echo "Assuming Terraform IAM Role"
+                            echo "======================================"
+
+                            CREDS=$(aws sts assume-role \
+                                --role-arn arn:aws:iam::156772973474:role/infrarole_vpc_iam_ec2 \
+                                --role-session-name jenkins-terraform-cd)
+
+                            export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
+                            export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
+                            export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
+
+                            echo ""
+                            echo "======================================"
+                            echo "AWS Identity - Assumed Role"
+                            echo "======================================"
+
+                            aws sts get-caller-identity
+
+                            echo ""
+                            echo "======================================"
+                            echo "Terraform Version"
+                            echo "======================================"
+
+                            terraform version
+
+                            echo ""
+                            echo "======================================"
+                            echo "Terraform Init"
+                            echo "======================================"
+
+                            terraform init
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Validate') {
+            steps {
+                dir('aws/dev') {
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'jenkins_ru_aws',
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+
+                        sh '''
+                            set -e
+
+                            CREDS=$(aws sts assume-role \
+                                --role-arn arn:aws:iam::156772973474:role/infrarole_vpc_iam_ec2 \
+                                --role-session-name jenkins-terraform-validate)
+
+                            export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
+                            export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
+                            export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
+
+                            echo "======================================"
+                            echo "Terraform Validate"
+                            echo "======================================"
+
+                            terraform validate
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Plan') {
+            steps {
+                dir('aws/dev') {
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'jenkins_ru_aws',
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+
+                        sh '''
+                            set -e
+
+                            CREDS=$(aws sts assume-role \
+                                --role-arn arn:aws:iam::156772973474:role/infrarole_vpc_iam_ec2 \
+                                --role-session-name jenkins-terraform-plan)
+
+                            export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
+                            export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
+                            export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
+
+                            echo "======================================"
+                            echo "Terraform Plan"
+                            echo "======================================"
+
+                            terraform plan
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                dir('aws/dev') {
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'jenkins_ru_aws',
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+
+                        sh '''
+                            set -e
+
+                            echo "======================================"
+                            echo "Assuming Terraform IAM Role"
+                            echo "======================================"
+
+                            CREDS=$(aws sts assume-role \
+                                --role-arn arn:aws:iam::156772973474:role/infrarole_vpc_iam_ec2 \
+                                --role-session-name jenkins-terraform-apply)
+
+                            export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
+                            export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
+                            export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
+
+                            echo ""
+                            echo "======================================"
+                            echo "Terraform Apply"
+                            echo "======================================"
+
+                            terraform apply -auto-approve
+
+                            echo ""
+                            echo "======================================"
+                            echo "Terraform Apply Completed"
+                            echo "======================================"
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+
+        success {
+            echo 'Terraform Apply completed successfully.'
+            echo 'AWS infrastructure has been created or updated.'
+        }
+
+        failure {
+            echo 'Terraform CD pipeline failed.'
+            echo 'Check the Console Output.'
+        }
+
+        always {
+            echo 'Jenkins CD pipeline execution finished.'
+        }
+    }
+}
