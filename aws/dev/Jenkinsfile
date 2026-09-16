@@ -1,0 +1,97 @@
+```groovy
+pipeline {
+    agent any
+
+    stages {
+
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Terraform Init & Validate & Plan') {
+            steps {
+
+                dir('aws/dev') {
+
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'jenkins_ru_aws',
+                            usernameVariable: 'AWS_ACCESS_KEY_ID',
+                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                        )
+                    ]) {
+
+                        sh '''
+                            set -e
+
+                            echo "======================================"
+                            echo "AWS Identity - Jenkins IAM User"
+                            echo "======================================"
+
+                            aws sts get-caller-identity
+
+                            echo
+                            echo "======================================"
+                            echo "Assuming Infrastructure Role"
+                            echo "======================================"
+
+                            CREDS=$(aws sts assume-role \
+                                --role-arn arn:aws:iam::156772973474:role/infrarole_vpc_iam_ec2 \
+                                --role-session-name jenkins-terraform)
+
+                            export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
+                            export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
+                            export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
+
+                            echo
+                            echo "======================================"
+                            echo "AWS Identity - Assumed Role"
+                            echo "======================================"
+
+                            aws sts get-caller-identity
+
+                            echo
+                            echo "======================================"
+                            echo "Terraform Init"
+                            echo "======================================"
+
+                            terraform init
+
+                            echo
+                            echo "======================================"
+                            echo "Terraform Validate"
+                            echo "======================================"
+
+                            terraform validate
+
+                            echo
+                            echo "======================================"
+                            echo "Terraform Plan"
+                            echo "======================================"
+
+                            terraform plan
+
+                            echo
+                            echo "======================================"
+                            echo "Terraform Plan Completed"
+                            echo "======================================"
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Terraform pipeline completed successfully.'
+        }
+
+        failure {
+            echo 'Terraform pipeline failed. Check the console output.'
+        }
+    }
+}
+```
