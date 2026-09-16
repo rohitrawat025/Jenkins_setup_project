@@ -1,96 +1,109 @@
 pipeline {
-    agent any
+agent any
 
-    stages {
+```
+stages {
 
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
+    stage('Checkout') {
+        steps {
+            echo 'Checking out source code...'
+            checkout scm
         }
+    }
 
-        stage('Terraform Init & Validate & Plan') {
-            steps {
+    stage('Terraform Init, Validate & Plan') {
+        steps {
+            dir('aws/dev') {
 
-                dir('aws/dev') {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'jenkins_ru_aws',
+                        usernameVariable: 'AWS_ACCESS_KEY_ID',
+                        passwordVariable: 'AWS_SECRET_ACCESS_KEY'
+                    )
+                ]) {
 
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: 'jenkins_ru_aws',
-                            usernameVariable: 'AWS_ACCESS_KEY_ID',
-                            passwordVariable: 'AWS_SECRET_ACCESS_KEY'
-                        )
-                    ]) {
+                    sh '''
+                        set -e
 
-                        sh '''
-                            set -e
+                        echo "======================================"
+                        echo "AWS Identity - Jenkins IAM User"
+                        echo "======================================"
 
-                            echo "======================================"
-                            echo "AWS Identity - Jenkins IAM User"
-                            echo "======================================"
+                        aws sts get-caller-identity
 
-                            aws sts get-caller-identity
+                        echo ""
+                        echo "======================================"
+                        echo "Assuming Terraform IAM Role"
+                        echo "======================================"
 
-                            echo
-                            echo "======================================"
-                            echo "Assuming Infrastructure Role"
-                            echo "======================================"
+                        CREDS=$(aws sts assume-role \
+                            --role-arn arn:aws:iam::156772973474:role/infrarole_vpc_iam_ec2 \
+                            --role-session-name jenkins-terraform)
 
-                            CREDS=$(aws sts assume-role \
-                                --role-arn arn:aws:iam::156772973474:role/infrarole_vpc_iam_ec2 \
-                                --role-session-name jenkins-terraform)
+                        export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
+                        export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
+                        export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
 
-                            export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r '.Credentials.AccessKeyId')
-                            export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r '.Credentials.SecretAccessKey')
-                            export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r '.Credentials.SessionToken')
+                        echo ""
+                        echo "======================================"
+                        echo "AWS Identity - Assumed Role"
+                        echo "======================================"
 
-                            echo
-                            echo "======================================"
-                            echo "AWS Identity - Assumed Role"
-                            echo "======================================"
+                        aws sts get-caller-identity
 
-                            aws sts get-caller-identity
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Version"
+                        echo "======================================"
 
-                            echo
-                            echo "======================================"
-                            echo "Terraform Init"
-                            echo "======================================"
+                        terraform version
 
-                            terraform init
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Init"
+                        echo "======================================"
 
-                            echo
-                            echo "======================================"
-                            echo "Terraform Validate"
-                            echo "======================================"
+                        terraform init
 
-                            terraform validate
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Validate"
+                        echo "======================================"
 
-                            echo
-                            echo "======================================"
-                            echo "Terraform Plan"
-                            echo "======================================"
+                        terraform validate
 
-                            terraform plan
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform Plan"
+                        echo "======================================"
 
-                            echo
-                            echo "======================================"
-                            echo "Terraform Plan Completed"
-                            echo "======================================"
-                        '''
-                    }
+                        terraform plan
+
+                        echo ""
+                        echo "======================================"
+                        echo "Terraform CI Completed"
+                        echo "======================================"
+                    '''
                 }
             }
         }
     }
+}
 
-    post {
-        success {
-            echo 'Terraform pipeline completed successfully.'
-        }
+post {
+    success {
+        echo 'Terraform CI pipeline completed successfully.'
+    }
 
-        failure {
-            echo 'Terraform pipeline failed. Check the console output.'
-        }
+    failure {
+        echo 'Terraform CI pipeline failed. Check the Console Output.'
+    }
+
+    always {
+        echo 'Jenkins pipeline execution finished.'
     }
 }
 ```
+
+}
